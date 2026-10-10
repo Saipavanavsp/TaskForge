@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'taskforge-backend'
+    metrics_path: '/metrics'
+    static_configs:
+      - targets: ['backend:8000']
+        labels:
+          environment: 'production'
+          service: 'fastapi-gateway'
+
+  - job_name: 'taskforge-traefik'
+    static_configs:
+      - targets: ['traefik:8080']

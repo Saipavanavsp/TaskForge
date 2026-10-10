@@ -1,0 +1,50 @@
+http:
+  middlewares:
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: "1m"
+
+    security-headers:
+      headers:
+        frameDeny: true
+        contentTypeNosniff: true
+        browserXssFilter: true
+        contentSecurityPolicy: "default-src 'self' 'unsafe-inline' 'unsafe-eval' * data: blob:"
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+
+  routers:
+    api-router:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/healthz`) || PathPrefix(`/metrics`) || PathPrefix(`/docs`) || PathPrefix(`/openapi.json`)"
+      service: backend-service
+      middlewares:
+        - rate-limit
+        - security-headers
+
+    socket-router:
+      rule: "PathPrefix(`/socket.io`)"
+      service: socket-service
+
+    frontend-router:
+      rule: "PathPrefix(`/`)"
+      service: frontend-service
+      middlewares:
+        - security-headers
+
+  services:
+    backend-service:
+      loadBalancer:
+        servers:
+          - url: "http://backend:8000"
+
+    socket-service:
+      loadBalancer:
+        servers:
+          - url: "http://realtime:4001"
+
+    frontend-service:
+      loadBalancer:
+        servers:
+          - url: "http://frontend:3000"

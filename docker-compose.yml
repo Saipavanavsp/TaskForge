@@ -1,0 +1,176 @@
+version: '3.8'
+
+services:
+  # Layer 6: Traefik Reverse Proxy & SSL Termination
+  traefik:
+    image: traefik:v3.1
+    container_name: taskforge-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080" # Traefik Web UI
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./infra/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./infra/traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+    depends_on:
+      - backend
+      - realtime
+      - frontend
+    networks:
+      - taskforge-net
+
+  # Layer 3 & Layer 7: FastAPI Backend Gateway
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.backend
+    container_name: taskforge-backend
+    restart: unless-stopped
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/taskforge
+      - REDIS_URL=redis://redis:6379/0
+      - SECRET_KEY=taskforge-super-secret-key-production-grade-256-bit-token
+      - ENVIRONMENT=production
+      - POSTGRES_SERVER=postgres
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=taskforge
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - taskforge-net
+
+  # Layer 3: Node.js Socket.io Real-time Engine
+  realtime:
+    build:
+      context: ./realtime
+      dockerfile: Dockerfile.realtime
+    container_name: taskforge-realtime
+    restart: unless-stopped
+    environment:
+      - PORT=4001
+      - REDIS_URL=redis://redis:6379/0
+    ports:
+      - "4001:4001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - taskforge-net
+
+  # Layer 4: Next.js 15 Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: taskforge-frontend
+    restart: unless-stopped
+    environment:
+      - BACKEND_INTERNAL_URL=http://backend:8000
+      - NODE_ENV=production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - taskforge-net
+
+  # Layer 1: PostgreSQL 16 Primary DB
+  postgres:
+    image: postgres:16-alpine
+    container_name: taskforge-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=taskforge
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d taskforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - taskforge-net
+
+  # Layer 1: Redis 7 Cache & PubSub Broker
+  redis:
+    image: redis:7-alpine
+    container_name: taskforge-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - taskforge-net
+
+  # S3 Object Storage: MinIO
+  minio:
+    image: minio/minio:latest
+    container_name: taskforge-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - taskforge-net
+
+  # Layer 7: Prometheus Metrics Scraper
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: taskforge-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    networks:
+      - taskforge-net
+
+  # Layer 7: Grafana Dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: taskforge-grafana
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    networks:
+      - taskforge-net
+
+networks:
+  taskforge-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

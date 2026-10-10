@@ -1,0 +1,14 @@
+{
+  "name": "taskforge-realtime",
+  "version": "1.0.0",
+  "description": "TaskForge Real-Time Distributed Socket Engine",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "socket.io": "^4.7.5",
+    "ioredis": "^5.4.1",
+    "dotenv": "^16.4.5"
+  }
+}
